@@ -1,0 +1,23 @@
+import assert from "node:assert/strict";
+import {shiftState, currentShift, weekBounds} from "./attendance-state.js";
+
+const time = value => Date.parse(value+"+07:00");
+const shift = {id:1,starts:"2026-11-15T22:00:00+07:00",ends:"2026-11-16T02:00:00+07:00",check_in:null,check_out:null,closed:0};
+assert.equal(shiftState(shift,time("2026-11-15T21:59:59")).canCheckIn,false);
+assert.equal(shiftState(shift,time("2026-11-15T22:00:00")).canCheckIn,true);
+assert.equal(currentShift([shift],time("2026-11-16T01:00:00")).id,1);
+assert.equal(shiftState(shift,time("2026-11-16T02:00:00")).canCheckIn,false);
+assert.equal(shiftState(shift,time("2026-11-16T02:00:00")).missedIn,true);
+const working = {...shift,check_in:"2026-11-15T22:10:00+07:00"};
+assert.equal(shiftState(working,time("2026-11-16T02:00:00")).canCheckOut,true);
+assert.equal(shiftState(working,time("2026-11-16T02:00:01")).canCheckOut,false);
+assert.equal(shiftState(working,time("2026-11-16T02:00:01")).missedOut,true);
+assert.equal(shiftState(working,time("2026-11-15T23:00:00")).late,true);
+assert.equal(shiftState({...working,excused:1},time("2026-11-15T23:00:00")).late,false);
+assert.equal(currentShift([{...working,check_out:shift.ends}],time("2026-11-16T01:00:00")),null);
+assert.equal(currentShift([{...shift,closed:1}],time("2026-11-16T01:00:00")),null);
+const monday = weekBounds(time("2026-11-16T01:00:00"));
+assert.equal(monday.start,time("2026-11-16T00:00:00"));
+assert.equal(monday.end,time("2026-11-23T00:00:00"));
+assert.ok(Date.parse(shift.starts)<monday.end && Date.parse(shift.ends)>monday.start);
+console.log("PASS attendance boundaries, overnight shift, closed period and Vietnam week");
