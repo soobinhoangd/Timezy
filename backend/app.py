@@ -23,6 +23,10 @@ from database.connection import DEFAULT_DB, SCHEMA, connect as connect_database,
 VN = timezone(timedelta(hours=7))
 DB = os.environ.get("TIMEZY_DB", str(DEFAULT_DB))
 FRONTEND = Path(__file__).resolve().parents[1] / "frontend"
+STATIC_ASSETS = {"/": ("index.html", "text/html; charset=utf-8"),
+                 "/attendance-state.js": ("attendance-state.js", "text/javascript; charset=utf-8"),
+                 "/app.js": ("app.js", "text/javascript; charset=utf-8"),
+                 "/styles.css": ("styles.css", "text/css; charset=utf-8")}
 MONTH = r"\d{4}-(?:0[1-9]|1[0-2])"
 
 
@@ -620,12 +624,8 @@ def validate_correction(row, entry, exit_, at):
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         path = urlsplit(self.path).path
-        assets = {"/": ("index.html", "text/html; charset=utf-8"),
-                  "/attendance-state.js": ("attendance-state.js", "text/javascript; charset=utf-8"),
-                  "/app.js": ("app.js", "text/javascript; charset=utf-8"),
-                  "/styles.css": ("styles.css", "text/css; charset=utf-8")}
-        if path in assets:
-            filename, content_type = assets[path]
+        if path in STATIC_ASSETS:
+            filename, content_type = STATIC_ASSETS[path]
             self.send_payload(200, (FRONTEND / filename).read_bytes(), content_type)
             return
         self.handle_api()

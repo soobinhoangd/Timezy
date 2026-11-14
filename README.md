@@ -2,6 +2,10 @@
 
 Backend và frontend web cho ứng dụng chấm công Đảo Matcha và Mixue. Mỗi nhân viên thuộc một cơ sở. Chủ quán quản lý cả hai cơ sở.
 
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https%3A%2F%2Fgithub.com%2Fsoobinhoangd%2FTimezy)
+
+Triển khai chạy liên tục với ổ đĩa SQLite riêng theo [hướng dẫn Render](DEPLOY_RENDER.md). Cấu hình dùng gói trả phí, chủ tài khoản xác nhận chi phí trên Render trước khi tạo dịch vụ.
+
 ## Cấu trúc dự án
 
 ```text

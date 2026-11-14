@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: timezy
+    runtime: docker
+    repo: https://github.com/soobinhoangd/Timezy
+    branch: main
+    plan: "0.5c-512mb"
+    healthCheckPath: /health
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: TIMEZY_DB
+        value: /var/data/timezy.sqlite3
+      - key: TIMEZY_ADMIN_USERNAME
+        sync: false
+      - key: TIMEZY_ADMIN_PASSWORD
+        sync: false
+    disk:
+      name: timezy-data
+      mountPath: /var/data
+      sizeGB: 1

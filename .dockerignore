@@ -1,0 +1,11 @@
+.git
+.venv
+.runtime
+.env
+.env.*
+**/__pycache__
+**/*.pyc
+**/*.sqlite3*
+**/*.log
+*.docx
+database/data
