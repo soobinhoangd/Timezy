@@ -51,7 +51,9 @@ Gọi `POST /login` với `username` và `password`, sau đó gửi header `Auth
 | Đổi mật khẩu | `POST /change-password` | Người đã đăng nhập gửi current_password và new_password |
 | Tạo mã khôi phục | `POST /recovery-code` | Người đã đăng nhập xác nhận current_password |
 | Quên mật khẩu | `POST /reset-password` | username, recovery_code và new_password |
-| Hồ sơ đang đăng nhập | `GET /me` | Tên, vai trò và cơ sở của tài khoản |
+| Hồ sơ đang đăng nhập | `GET /me` | Avatar, tên, email, cơ sở, ngôn ngữ, ngày sinh, giới tính, điện thoại, CCCD, mã nhân viên, đơn giá giờ và ngày gia nhập của chính tài khoản |
+| Cập nhật thông tin cá nhân | `POST /me/profile` | name, birth_date, gender, email, phone, national_id. Mã nhân viên, đơn giá và ngày gia nhập chỉ đọc |
+| Avatar | `POST /me/avatar` | avatar là data URL JPEG tối đa 24.000 ký tự hoặc null để xóa. Frontend cắt ảnh JPEG/PNG/WebP tối đa 5 MB thành JPEG vuông 128px, backend kiểm tra và chuẩn hóa lại |
 | Quản lý nhân viên | `GET /employees`, `POST /employees` | Chủ quán tạo tài khoản với name, username, password, shop_id và hourly_rate |
 | Cơ sở và thông báo | `GET /shops`, `GET /notifications` | Dữ liệu theo phạm vi tài khoản |
 | Mở ca đăng ký | `POST /shifts` | Chủ quán gửi `shop_id`, `starts`, `ends` |
@@ -64,6 +66,10 @@ Gọi `POST /login` với `username` và `password`, sau đó gửi header `Auth
 | Công bố ca tuần sau | `POST /weekly/publish` | Chủ quán gửi shop_id, day, slot, employee_ids từ những người đã tích đăng ký |
 | Lịch và bảng chấm công | `GET /attendance?day=2026-12-10&shop_id=1` | Có thể bỏ bộ lọc. Nhân viên chỉ xem ca của mình |
 | Báo chưa có ca | `POST /schedule-issues` | Nhân viên gửi `reason` cho chủ quán |
+| Chọn người thay ca | `GET /attendance/{id}/replacements` | Người đang được xếp ca xem nhân viên cùng quán đã duyệt và không trùng giờ |
+| Gửi yêu cầu đổi ca | `POST /attendance/{id}/transfer` | recipient_id là người được nhờ thay. Ca thuộc người gửi cho đến khi người nhận đồng ý |
+| Xem và trả lời đổi ca | `GET /shift-transfers`, `POST /shift-transfers/{id}/respond` | Người nhận gửi accept boolean. Chủ quán xem được danh sách, nhân viên chỉ xem yêu cầu liên quan mình |
+| Hủy đổi ca | `POST /shift-transfers/{id}/cancel` | Người gửi hủy yêu cầu còn chờ |
 | Check-in và check-out | `POST /attendance/{id}/check-in`, `POST /attendance/{id}/check-out` | Nhân viên thao tác bằng ID bản ghi chấm công |
 | Giải trình | `POST /attendance/{id}/requests` | Nhân viên gửi `kind: "explanation"` và `reason` |
 | Bổ sung công | `POST /attendance/{id}/requests` | Nhân viên gửi `kind: "correction"`, `reason`, `check_in`, `check_out` |
@@ -80,13 +86,18 @@ Gọi `POST /login` với `username` và `password`, sau đó gửi header `Auth
 - Ghi nhớ đăng nhập gửi remember=true tới login và giữ token trong localStorage tối đa 30 ngày. Nếu bỏ chọn, phiên lưu trong sessionStorage và hết hạn sau 12 giờ. Đăng xuất xóa token ở cả hai nơi. Mật khẩu không được lưu trong bộ nhớ trình duyệt bởi ứng dụng.
 - Quên mật khẩu dùng mã khôi phục ngẫu nhiên cấp khi đăng ký. Tài khoản cũ tạo mã trong mục Tài khoản sau khi xác nhận mật khẩu hiện tại. Mã mới thay thế mã cũ, cần lưu riêng. Sau khi đặt lại mật khẩu, mã được đổi và trả một lần trên giao diện. Phương thức này hoạt động local và không cần dịch vụ email.
 - Đổi và đặt lại mật khẩu kết thúc tất cả phiên của tài khoản. Database giữ bản băm mật khẩu, token và mã khôi phục.
+- Tài khoản hiển thị avatar, tên, email, cơ sở và ngôn ngữ hiện tại Tiếng Việt. Nhấn Thông tin cơ bản để xem tên, ngày sinh, giới tính, email, điện thoại, CCCD, mã nhân viên, mức lương theo giờ và ngày gia nhập. Người dùng có thể đổi avatar và cập nhật thông tin cá nhân. Dữ liệu thiếu của tài khoản cũ hiển thị Chưa cập nhật.
+- Mã nhân viên tự cấp theo ID, tiền tố NV cho nhân viên và QL cho chủ quán. Ngày gia nhập được ghi khi kích hoạt tài khoản mới; ngày chưa biết của tài khoản cũ để trống. Các API hồ sơ chỉ thao tác dữ liệu của người đăng nhập.
 
 - Tác vụ nền mở kỳ từ mùng 9 theo giờ Việt Nam, gửi thông báo trong ứng dụng cho người có ca được công bố trong tháng trước. Server chạy lại sẽ tự xử lý kỳ đến hạn chưa mở.
 - Check-in được phép từ giờ bắt đầu đến trước giờ kết thúc ca. Check-out được phép trong giờ ca, gồm đúng mốc kết thúc. Hết ca mà thiếu giờ vào hoặc giờ ra thì nhân viên gửi giải trình kèm giờ thực tế để duyệt bổ sung.
 - Trang Ca làm của tôi có nút chấm công ở đầu trang, đồng hồ đồng bộ từ máy chủ và lịch tuần thứ Hai đến Chủ nhật theo giờ Việt Nam. Dữ liệu tự cập nhật mỗi 15 giây và khi quay lại tab. Nút Giải trình xuất hiện ở ca đi muộn hoặc thiếu giờ chấm.
-- Đăng ký & xếp ca có hai bảng. Lịch tuần này có nhân viên theo hàng và thứ Hai đến Chủ nhật theo cột. Đăng ký tuần sau có bốn ca theo hàng và bảy ngày theo cột. Nhân viên chọn ca rồi bấm Xác nhận đăng ký. Sau khi gửi, bấm Chỉnh sửa đăng ký và Xác nhận thay đổi để gửi bản mới, hoặc Hủy chỉnh sửa để giữ bản đã gửi. Chủ quán chỉ thấy bản đã xác nhận và chọn người từ từng ô để công bố ca.
+- Đăng ký & xếp ca có hai bảng với ba hàng sáng, chiều, tối và các ngày thứ Hai đến Chủ nhật theo cột. Lịch tuần này ghi tên nhân viên trong từng ô, ngăn cách bằng dấu /. Ca tối gãy ghi (G) sau tên. Trong đăng ký tuần sau, mỗi ô tối có hai lựa chọn riêng Full và Gãy, mỗi lựa chọn một vị trí; sáng và chiều mỗi ca một vị trí. Nhân viên chọn ca rồi bấm Xác nhận đăng ký. Sau khi gửi, bấm Chỉnh sửa đăng ký và Xác nhận thay đổi để gửi bản mới, hoặc Hủy chỉnh sửa để giữ bản đã gửi. Chủ quán chỉ thấy bản đã xác nhận và chọn người từ từng ô để công bố ca.
 - Thay đổi chưa xác nhận nằm trong giao diện. Rời trang có thay đổi sẽ được nhắc. Ca đã công bố được khóa. Xác nhận lại kiểm tra revision để tránh ghi đè thay đổi từ tab khác. Có thể xác nhận không đăng ký ca nào trong tuần.
 - Bốn ca mặc định là sáng 07:30–12:00, chiều 12:00–18:00, tối full 18:00–23:30 và tối gãy 20:00–23:30. Chủ quán có thể cấu hình giờ từng quán. Nhân viên có thể đăng ký nhiều lựa chọn, chủ quán sẽ được báo nếu xếp trùng giờ.
+- Mỗi ca chỉ xếp một nhân viên. Buổi sáng một người, buổi chiều một người, buổi tối hai vị trí riêng gồm một người full và một người gãy. Giao diện chọn một người bằng radio và API kiểm tra số lượng trước khi công bố.
+- Nút Đổi ca nằm tại từng ca và lịch tuần của nhân viên. Chỉ chuyển ca chưa bắt đầu, chưa chấm công và thuộc kỳ chưa chốt. Người thay cần cùng quán, đã duyệt và không trùng ca. Hệ thống kiểm tra lại khi người nhận đồng ý, chuyển bản ghi xếp ca nguyên tử và dùng đơn giá giờ của người nhận. Lịch tuần, danh sách ca, đăng ký ca và thông báo được cập nhật. Một ca chỉ có một yêu cầu đổi đang chờ.
+- Người nhận đồng ý hoặc từ chối trong Ca làm của tôi hoặc Thông báo. Người gửi hủy được yêu cầu chờ. Chủ quán nhận thông báo sau khi đổi thành công. Ca đã bắt đầu làm yêu cầu chờ hết hiệu lực. Chủ quán đổi giờ ca sẽ hủy các yêu cầu thay ca đang chờ.
 - Duyệt giải trình đi muộn loại ca khỏi thống kê đi muộn và giữ giờ chấm. Duyệt bỏ ca chuyển thành vắng có lý do. Ca vắng không phát sinh giờ công.
 - Lương tạm tính theo giờ thực tế nhân đơn giá theo giờ, làm tròn đến đồng theo từng ca. Đơn giá được lưu tại thời điểm công bố ca. Ca qua đêm thuộc tháng của giờ bắt đầu.
 - Duyệt thay đổi công sẽ yêu cầu nhân viên xác nhận lại nếu họ đã xác nhận. Kỳ đã chốt khóa thao tác chỉnh công.

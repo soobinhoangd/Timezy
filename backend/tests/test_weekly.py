@@ -102,6 +102,31 @@ class WeeklyTest(unittest.TestCase):
         self.assertEqual(error.exception.status,409)
         self.assertEqual(self.db.execute("SELECT COUNT(*) FROM shifts").fetchone()[0],count)
 
+    def test_exactly_one_employee_per_slot(self):
+        self.tick(2,"morning")
+        self.tick(3,"morning")
+        with self.assertRaises(app.APIError):
+            self.call("/weekly/publish",shop_id=1,day="2026-11-16",slot="morning",employee_ids=[2,3])
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM attendance").fetchone()[0],0)
+        self.call("/weekly/publish",shop_id=1,day="2026-11-16",slot="morning",employee_ids=[2])
+        self.tick(2,"evening")
+        self.tick(3,"split")
+        self.call("/weekly/publish",shop_id=1,day="2026-11-16",slot="evening",employee_ids=[2])
+        self.call("/weekly/publish",shop_id=1,day="2026-11-16",slot="split",employee_ids=[3])
+        assigned=self.db.execute("""SELECT w.slot,COUNT(*) AS count FROM weekly_slots w
+                                   JOIN attendance a ON a.shift_id=w.shift_id GROUP BY w.slot""").fetchall()
+        self.assertEqual({row["slot"]:row["count"] for row in assigned},{"morning":1,"evening":1,"split":1})
+        sid=self.call("/shifts",shop_id=1,starts="2026-11-16T07:45:00+07:00",
+                      ends="2026-11-16T12:00:00+07:00")["id"]
+        self.call(f"/shifts/{sid}/register",3)
+        with self.assertRaises(app.APIError) as error:
+            self.call(f"/shifts/{sid}/publish",employee_ids=[3])
+        self.assertEqual(error.exception.status,409)
+        with self.assertRaises(sqlite3.IntegrityError):
+            with self.db:
+                self.db.execute("INSERT INTO attendance(shift_id,user_id,hourly_rate) VALUES (?,3,25000)",
+                                (self.db.execute("SELECT shift_id FROM weekly_slots WHERE slot='morning'").fetchone()[0],))
+
 
 if __name__=="__main__":
     unittest.main()

@@ -27,7 +27,10 @@ def initialize(path):
         db.execute("""INSERT OR IGNORE INTO account_profiles(user_id,role,status)
                       SELECT id,CASE WHEN shop_id IS NULL THEN 'owner' ELSE 'employee' END,
                       'active' FROM users""")
-        db.execute("PRAGMA user_version=6")
+        db.execute("""INSERT OR IGNORE INTO employee_metadata(user_id,employee_code)
+                      SELECT id,(CASE WHEN shop_id IS NULL THEN 'QL' ELSE 'NV' END)||printf('%06d',id)
+                      FROM users""")
+        db.execute("PRAGMA user_version=9")
         db.commit()
     finally:
         db.close()

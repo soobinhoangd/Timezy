@@ -12,4 +12,8 @@ Các trường ngày giờ được nhập theo giờ Việt Nam. Chọn ghi nh�
 
 Trang đăng nhập có Đăng ký và Quên mật khẩu. Mục Tài khoản cho phép đổi mật khẩu và tạo mã khôi phục. Chủ quán duyệt người tự đăng ký tại mục Nhân viên.
 
+Trang Tài khoản có avatar, tên, email, cơ sở và ngôn ngữ Tiếng Việt. Thông tin cơ bản mở hồ sơ cá nhân cùng mã nhân viên, lương theo giờ và ngày gia nhập. Có thể cập nhật dữ liệu cá nhân và đổi ảnh. Các thiết lập mật khẩu nằm trong mục Bảo mật tài khoản có thể mở rộng.
+
+Đổi ca được gửi từ thẻ ca hoặc lịch tuần. Chọn nhân viên cùng quán đủ điều kiện, sau đó người nhận xác nhận trong trang chủ hoặc Thông báo. Lịch tuần hiện tại tự tải lại mỗi 15 giây. Trang chủ cập nhật ca và yêu cầu đổi mỗi 15 giây hoặc khi quay lại tab.
+
 Đăng ký & xếp ca có thanh Lịch tuần này và Đăng ký lịch tuần sau. Nhân viên xem lịch của cả quán trong tuần hiện tại, tích ca sáng, chiều, tối full từ 18h hoặc tối gãy từ 20h cho tuần tiếp theo, sau đó bấm Xác nhận đăng ký. Để thay đổi, bấm Chỉnh sửa đăng ký rồi Xác nhận thay đổi hoặc Hủy chỉnh sửa. Chủ quán nhận các lựa chọn đã xác nhận và chọn người để công bố từng ca. Bảng tuần có thể cuộn ngang trên điện thoại.

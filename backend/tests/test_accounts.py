@@ -63,6 +63,7 @@ class AccountTest(unittest.TestCase):
             self.call(f"/account-registrations/{account['id']}/approve", token, hourly_rate=25000)
         employee_token = self.login("staff")["token"]
         self.assertEqual(self.call("/me", employee_token, method="GET")["shop_id"], 1)
+        self.assertEqual(self.call("/me", employee_token, method="GET")["joined_on"],self.at[:10])
         self.assertEqual(self.login("manager")["role"], "owner")
         with self.assertRaises(app.APIError):
             self.call("/change-password", employee_token, current_password="wrong",

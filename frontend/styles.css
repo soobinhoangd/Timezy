@@ -70,15 +70,53 @@ th { color: #69796f; font-weight: 500; background: #f4f6ef; }
 .week-table { min-width: 880px; }
 .week-table td { white-space: normal; min-width: 100px; vertical-align: top; }
 .week-table th { white-space: normal; min-width: 130px; }
+.roster-table { table-layout: fixed; min-width: 1000px; background: white; }
+.roster-table th, .roster-table td { border: 1px solid #526452; text-align: center; vertical-align: middle; overflow-wrap: anywhere; padding: 13px 9px; }
+.roster-table thead th { background: #d9ead3; color: #1c3828; }
+.roster-table thead th.weekend { background: #f4cece; color: #742e2e; }
+.roster-table tbody th { background: #f1f4ec; }
+.roster-table td { height: 72px; line-height: 1.8; }
+.roster-table .actions { justify-content: center; margin-top: 9px; }
+.my-roster-name { color: #195b43; font-weight: 600; }
+.roster-separator { color: #69796f; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .schedule-chip { background: #e8eddb; border-radius: 8px; padding: 9px; margin-bottom: 6px; }
 .schedule-chip small, .week-table small { font-size: 12px; font-weight: 400; }
 .slot-check { display: flex; align-items: center; flex-direction: column; min-height: 85px; padding: 12px 5px; border-radius: 10px; }
 .slot-check.is-checked { background: #e8eddb; }
 .slot-check input { width: 23px; height: 23px; accent-color: #195b43; }
+.registration-option { padding: 8px 0; }
+.registration-option + .registration-option { border-top: 1px solid #a5b4a2; margin-top: 10px; padding-top: 16px; }
+.registration-option > small { display: inline-block; margin-bottom: 8px; }
+.registration-option .candidate-list { margin-top: 10px; }
+.registration-option button { max-width: 100%; padding: 9px; }
 .candidate-list { display: grid; gap: 6px; margin-bottom: 10px; }
 .time-pair { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; }
 .registration-actions { margin-top: 22px; padding: 20px 0; }
+.request-queue { margin-top: 32px; }
+.profile-header { display: flex; align-items: center; gap: 24px; margin: 24px 0; }
+.profile-photo { flex: 0 0 auto; display: grid; justify-items: center; gap: 10px; }
+.profile-avatar { width: 96px; height: 96px; border-radius: 50%; background: #dce9ce; color: #195b43; display: grid; place-items: center; overflow: hidden; font-size: 30px; font-weight: 600; }
+.profile-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.avatar-upload { color: #195b43; cursor: pointer; padding: 7px 12px; border: 1px solid #d7dfd5; border-radius: 8px; background: #fff; }
+.profile-photo:focus-within .avatar-upload { outline: 3px solid #a1b85c; }
+.profile-identity { min-width: 0; overflow-wrap: anywhere; }
+.profile-identity h2 { font-size: 24px; margin-bottom: 9px; }
+.account-menu { padding: 0; margin-bottom: 26px; overflow: hidden; }
+.account-menu-item { display: flex; justify-content: space-between; align-items: center; gap: 20px; width: 100%; padding: 22px; border: 0; border-radius: 0; color: #23392f; background: white; text-align: left; }
+.account-menu-item + .account-menu-item { border-top: 1px solid #e2e7dc; }
+.account-menu-item strong { display: block; font-weight: 600; }
+.account-menu-item small { display: block; color: #69796f; margin-top: 6px; font-size: 12px; }
+.account-security > summary { cursor: pointer; font-weight: 600; padding: 12px 0; }
+.profile-details { margin: 22px 0; }
+.profile-details > div { display: grid; grid-template-columns: 135px minmax(0,1fr); gap: 14px; padding: 14px 0; border-bottom: 1px solid #e2e7dc; }
+.profile-details dt { color: #69796f; }
+.profile-details dd { margin: 0; overflow-wrap: anywhere; }
 @media (max-width: 760px) {
+  .profile-header { gap: 16px; padding: 18px; align-items: flex-start; }
+  .profile-avatar { width: 72px; height: 72px; font-size: 24px; }
+  .profile-identity h2 { font-size: 20px; }
+  .profile-details > div { grid-template-columns: 105px minmax(0,1fr); }
   .shell { display: block; }
   aside { padding: 17px; gap: 16px; }
   aside > p, .account > .muted { display: none; }

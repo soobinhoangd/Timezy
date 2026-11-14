@@ -31,38 +31,43 @@ def seed():
                            (username, name, f"{salt}:{app.password_hash(PASSWORD, salt)}", shop, 25000))
             # Demo fixtures represent employees already approved by the demo owner.
             db.execute("UPDATE account_profiles SET status='active' WHERE role='employee'")
+            db.execute("UPDATE employee_metadata SET joined_on=?",(app.now()[:10],))
             current = app.datetime.now(app.VN).replace(microsecond=0)
             last_month = current.replace(day=1) - timedelta(days=1)
             for branch, employees in ((1, (2, 3)), (2, (4, 5))):
-                # A current assigned shift lets an employee check in immediately.
-                starts, ends = current - timedelta(minutes=10), current + timedelta(hours=3)
-                sid = db.execute("INSERT INTO shifts(shop_id,starts,ends,published) VALUES (?,?,?,1)",
-                                 (branch, app.timestamp(starts), app.timestamp(ends))).lastrowid
-                for employee in employees:
-                    db.execute("INSERT INTO registrations VALUES (?,?)", (sid, employee))
+                # One assignee for each of the four configured positions.
+                for slot, begin, finish, employee in (
+                    ("morning", "07:30", "12:00", employees[0]),
+                    ("afternoon", "12:00", "18:00", employees[1]),
+                    ("evening", "18:00", "23:30", employees[0]),
+                    ("split", "20:00", "23:30", employees[1]),
+                ):
+                    day = current.date().isoformat()
+                    starts, ends = day+"T"+begin+":00+07:00", day+"T"+finish+":00+07:00"
+                    sid = db.execute("INSERT INTO shifts(shop_id,starts,ends,published) VALUES (?,?,?,1)",
+                                     (branch, starts, ends)).lastrowid
+                    db.execute("INSERT INTO weekly_slots VALUES (?,?,?,?)", (branch,day,slot,sid))
+                    db.execute("INSERT INTO registrations VALUES (?,?)", (sid,employee))
                     db.execute("INSERT INTO attendance(shift_id,user_id,hourly_rate) VALUES (?,?,25000)",
-                               (sid, employee))
-                # An open slot contains candidates so owners can try publishing.
-                starts = (current + timedelta(days=1)).replace(hour=17, minute=0, second=0)
+                               (sid,employee))
+                # An open slot can have multiple applicants for one position.
+                starts = (current + timedelta(days=1)).replace(hour=7,minute=30,second=0)
+                ends = starts.replace(hour=12,minute=0)
                 sid = db.execute("INSERT INTO shifts(shop_id,starts,ends) VALUES (?,?,?)",
-                                 (branch, app.timestamp(starts), app.timestamp(starts + timedelta(hours=5)))).lastrowid
+                                 (branch,app.timestamp(starts),app.timestamp(ends))).lastrowid
                 for employee in employees:
-                    db.execute("INSERT INTO registrations VALUES (?,?)", (sid, employee))
-                # A previous-month period contains both normal and missing punches.
-                starts = last_month.replace(day=15, hour=17, minute=0, second=0)
-                ends = starts + timedelta(hours=5)
-                sid = db.execute("INSERT INTO shifts(shop_id,starts,ends,published) VALUES (?,?,?,1)",
-                                 (branch, app.timestamp(starts), app.timestamp(ends))).lastrowid
+                    db.execute("INSERT INTO registrations VALUES (?,?)", (sid,employee))
+                # Historical examples use different days to keep one person per position.
                 for index, employee in enumerate(employees):
-                    aid = db.execute("""INSERT INTO attendance(shift_id,user_id,hourly_rate,check_in,check_out)
-                                        VALUES (?,?,25000,?,?)""",
-                                     (sid, employee, app.timestamp(starts),
-                                      app.timestamp(ends) if index == 0 else None)).lastrowid
-                    if index == 1:
-                        db.execute("""INSERT INTO requests(attendance_id,kind,reason,proposed_in,proposed_out,created)
-                                      VALUES (?,'correction',?,?,?,?)""",
-                                   (aid, "Em quên chấm giờ ra sau khi dọn quầy.",
-                                    app.timestamp(starts), app.timestamp(ends), app.now()))
+                    starts = last_month.replace(day=15+index,hour=7,minute=30,second=0)
+                    ends = starts.replace(hour=12,minute=0)
+                    sid = db.execute("INSERT INTO shifts(shop_id,starts,ends,published) VALUES (?,?,?,1)",
+                                     (branch,app.timestamp(starts),app.timestamp(ends))).lastrowid
+                    aid = db.execute("INSERT INTO attendance(shift_id,user_id,hourly_rate,check_in,check_out) VALUES (?,?,25000,?,?)",
+                                     (sid,employee,app.timestamp(starts),app.timestamp(ends) if index==0 else None)).lastrowid
+                    if index==1:
+                        db.execute("INSERT INTO requests(attendance_id,kind,reason,proposed_in,proposed_out,created) VALUES (?,'correction',?,?,?,?)",
+                                   (aid,"Em quên chấm giờ ra sau khi dọn quầy.",app.timestamp(starts),app.timestamp(ends),app.now()))
             app.open_periods(db, app.now())
             for employee in (2, 3, 4, 5):
                 app.notify(db, employee, "Lịch demo đã sẵn sàng. Bạn có thể thử chấm công và xem bảng công.", app.now())

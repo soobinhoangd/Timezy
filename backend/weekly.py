@@ -48,8 +48,9 @@ def handle_weekly(db, method, path, query, data, actor, at, publish):
                     LEFT JOIN account_profiles p ON p.user_id=u.id
                     WHERE u.shop_id=? AND (p.status IS NULL OR p.status='active')
                     ORDER BY u.name""", branch)
-        schedule = records(db, """SELECT a.user_id,s.id,s.starts,s.ends FROM attendance a
-                    JOIN shifts s ON s.id=a.shift_id WHERE s.shop_id=? AND s.published=1
+        schedule = records(db, """SELECT a.user_id,a.id AS attendance_id,s.id,s.starts,s.ends,w.slot FROM attendance a
+                    JOIN shifts s ON s.id=a.shift_id LEFT JOIN weekly_slots w ON w.shift_id=s.id
+                    WHERE s.shop_id=? AND s.published=1
                     AND s.starts<? AND s.ends>? ORDER BY s.starts""",
                     branch, end.isoformat()+"T00:00:00+07:00", start.isoformat()+"T00:00:00+07:00")
         available = records(db, """SELECT w.*,u.name FROM weekly_availability w
@@ -141,8 +142,8 @@ def handle_weekly(db, method, path, query, data, actor, at, publish):
         require(isinstance(day,str) and day in next_days,
                 "Chỉ xếp lịch tuần sau.")
         require(isinstance(slot,str) and slot in dict(SLOTS), "Ca không hợp lệ.")
-        require(isinstance(selected,list) and selected and all(type(i) is int and i>0 for i in selected),
-                "Chọn ít nhất một nhân viên.")
+        require(isinstance(selected,list) and len(selected)==1 and type(selected[0]) is int and selected[0]>0,
+                "Mỗi ca chỉ được xếp đúng một nhân viên.")
         template = next(t for t in templates if t["slot"]==slot)
         require(template["starts"] and template["ends"], "Chủ quán cần cấu hình giờ ca trước khi công bố.")
         candidates = records(db, """SELECT w.user_id FROM weekly_availability w JOIN users u ON u.id=w.user_id

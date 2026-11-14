@@ -15,6 +15,9 @@ from urllib.parse import parse_qs, urlsplit
 
 from openpyxl import Workbook
 from backend.weekly import WeeklyError, handle_weekly
+from backend.transfers import TransferError, handle_transfers
+from backend.capacity import position_occupied
+from backend.profiles import ProfileError, profile_info, update_profile, update_avatar
 from database.connection import DEFAULT_DB, SCHEMA, connect as connect_database, initialize
 
 VN = timezone(timedelta(hours=7))
@@ -256,6 +259,8 @@ def dispatch(db, method, path, query, data, auth, at):
                    (uid, role, status))
         db.execute("INSERT INTO account_details VALUES (?,?,?,?,?)",
                    (uid, birth_date, gender, email, phone))
+        if first_owner:
+            db.execute("UPDATE employee_metadata SET joined_on=? WHERE user_id=?",(at[:10],uid))
         code = recovery_code(db, uid)
         for admin in rows(db, """SELECT u.id FROM users u LEFT JOIN account_profiles p ON p.user_id=u.id
                                 WHERE u.shop_id IS NULL AND (p.status IS NULL OR p.status='active') AND u.id<>?""", uid):
@@ -301,6 +306,11 @@ def dispatch(db, method, path, query, data, auth, at):
     require(not profile or profile["status"] == "active", "Tài khoản chưa được kích hoạt.", 403)
     uid, shop = actor["id"], actor["shop_id"]
     owner = shop is None
+    if path=="/shift-transfers" or path.startswith("/shift-transfers/") or re.fullmatch(r"/attendance/\d+/(replacements|transfer)",path):
+        try:
+            return handle_transfers(db,method,path,data,actor,at)
+        except TransferError as error:
+            raise APIError(error.status,error.message) from None
     if path == "/weekly" or path.startswith("/weekly/"):
         try:
             return handle_weekly(db,method,path,query,data,actor,at,
@@ -334,11 +344,17 @@ def dispatch(db, method, path, query, data, auth, at):
         require(type(rate) is int and 0 <= rate <= 10000000, "Đơn giá không hợp lệ.")
         db.execute("UPDATE account_profiles SET status='active' WHERE user_id=?", (int(approval[1]),))
         db.execute("UPDATE users SET hourly_rate=? WHERE id=?", (rate, int(approval[1])))
+        db.execute("UPDATE employee_metadata SET joined_on=COALESCE(joined_on,?) WHERE user_id=?",
+                   (at[:10],int(approval[1])))
         notify(db, int(approval[1]), "Tài khoản của bạn đã được duyệt.", at)
         return {"ok": True}
     if path == "/me" and method == "GET":
-        return {"id": uid, "name": actor["name"], "shop_id": shop,
-                "role": "owner" if owner else "employee"}
+        return profile_info(db,uid)
+    if path in ("/me/profile","/me/avatar") and method=="POST":
+        try:
+            return update_profile(db,uid,data,at) if path=="/me/profile" else update_avatar(db,uid,data)
+        except ProfileError as error:
+            raise APIError(error.status,error.message) from None
     if path == "/employees" and method == "GET":
         require(owner, "Chỉ chủ quán xem danh sách nhân viên.", 403)
         return rows(db, """SELECT u.id,u.name,u.username,u.shop_id,u.hourly_rate FROM users u
@@ -415,6 +431,10 @@ def dispatch(db, method, path, query, data, auth, at):
                 return dict(shift)
             for employee in rows(db, "SELECT user_id FROM registrations WHERE shift_id=?", sid):
                 notify(db, employee["user_id"], f"Ca {shift['starts']} đã đổi sang {starts}. Hãy đăng ký lại.", at)
+            for transfer in rows(db,"SELECT recipient_id FROM shift_transfers WHERE shift_id=? AND status='pending'",sid):
+                notify(db,transfer["recipient_id"],"Yêu cầu thay ca đã hủy vì chủ quán đổi giờ ca.",at)
+            db.execute("UPDATE shift_transfers SET status='cancelled',responded=? WHERE shift_id=? AND status='pending'",
+                       (at,sid))
             db.execute("DELETE FROM attendance WHERE shift_id=?", (sid,))
             db.execute("DELETE FROM registrations WHERE shift_id=?", (sid,))
             db.execute("UPDATE shifts SET starts=?,ends=?,published=0 WHERE id=?", (starts, ends, sid))
@@ -425,8 +445,12 @@ def dispatch(db, method, path, query, data, auth, at):
         if action == "publish" and method == "POST":
             require(not shift["published"] and shift["starts"] > at, "Ca đã công bố hoặc đã bắt đầu.", 409)
             selected = data.get("employee_ids")
-            require(isinstance(selected, list) and selected and
-                    all(type(i) is int and i > 0 for i in selected), "Cần chọn ít nhất một nhân viên.")
+            require(isinstance(selected, list) and len(selected)==1 and
+                    type(selected[0]) is int and selected[0]>0, "Mỗi ca chỉ được xếp đúng một nhân viên.")
+            require(not one(db,"SELECT 1 FROM attendance WHERE shift_id=?",sid),
+                    "Ca đã có nhân viên được xếp.",409)
+            require(not position_occupied(db,shift),
+                    "Vị trí ca này trong ngày đã có nhân viên ở một lịch khác.",409)
             for employee in set(selected):
                 candidate = one(db, """SELECT u.hourly_rate FROM registrations r JOIN users u ON u.id=r.user_id
                                        WHERE r.shift_id=? AND r.user_id=? AND u.shop_id=?""",
@@ -680,6 +704,10 @@ def main():
             db.execute("INSERT INTO users(username,name,password,shop_id,hourly_rate) VALUES (?,?,?,?,?)",
                        (args.username, args.name, f"{salt}:{password_hash(password, salt)}",
                         args.shop, args.hourly_rate))
+            if args.shop is None:
+                db.execute("""UPDATE employee_metadata SET joined_on=?
+                              WHERE user_id=(SELECT id FROM users WHERE username=?)""",
+                           (now()[:10],args.username))
             if args.shop is not None:
                 for admin in rows(db, """SELECT u.id FROM users u LEFT JOIN account_profiles p ON p.user_id=u.id
                                         WHERE u.shop_id IS NULL AND (p.status IS NULL OR p.status='active')"""):

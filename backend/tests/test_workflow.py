@@ -55,7 +55,7 @@ class WorkflowTest(unittest.TestCase):
             try:
                 self.assertEqual(db.execute("SELECT COUNT(*) FROM users").fetchone()[0], 1)
                 self.assertEqual(db.execute("SELECT status FROM account_profiles").fetchone()[0], "pending")
-                self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 6)
+                self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 9)
                 self.assertEqual(db.execute("SELECT week_start FROM weekly_submissions").fetchone()[0], "2026-11-16")
             finally:
                 db.close()

@@ -115,3 +115,44 @@ CREATE TABLE IF NOT EXISTS weekly_submissions (
     confirmed_at TEXT NOT NULL,
     PRIMARY KEY (user_id,week_start)
 );
+CREATE TABLE IF NOT EXISTS shift_transfers (
+    id INTEGER PRIMARY KEY,
+    attendance_id INTEGER REFERENCES attendance(id) ON DELETE SET NULL,
+    shift_id INTEGER NOT NULL REFERENCES shifts(id),
+    sender_id INTEGER NOT NULL REFERENCES users(id),
+    recipient_id INTEGER NOT NULL REFERENCES users(id),
+    status TEXT NOT NULL DEFAULT 'pending'
+      CHECK (status IN ('pending','accepted','rejected','cancelled')),
+    created TEXT NOT NULL,
+    responded TEXT,
+    CHECK (sender_id<>recipient_id)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS one_pending_transfer
+ON shift_transfers(attendance_id) WHERE status='pending';
+CREATE INDEX IF NOT EXISTS transfers_by_recipient ON shift_transfers(recipient_id,status);
+CREATE TRIGGER IF NOT EXISTS one_employee_per_shift_insert
+BEFORE INSERT ON attendance
+WHEN EXISTS(SELECT 1 FROM attendance WHERE shift_id=NEW.shift_id)
+BEGIN
+    SELECT RAISE(ABORT,'Mỗi ca chỉ có một nhân viên');
+END;
+CREATE TRIGGER IF NOT EXISTS one_employee_per_shift_update
+BEFORE UPDATE OF shift_id ON attendance
+WHEN NEW.shift_id<>OLD.shift_id AND EXISTS(SELECT 1 FROM attendance WHERE shift_id=NEW.shift_id)
+BEGIN
+    SELECT RAISE(ABORT,'Mỗi ca chỉ có một nhân viên');
+END;
+CREATE TABLE IF NOT EXISTS employee_metadata (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id),
+    employee_code TEXT NOT NULL UNIQUE,
+    national_id TEXT UNIQUE CHECK (national_id IS NULL OR length(national_id)=12),
+    joined_on TEXT,
+    avatar TEXT,
+    language TEXT NOT NULL DEFAULT 'vi' CHECK (language='vi')
+);
+CREATE TRIGGER IF NOT EXISTS create_employee_metadata
+AFTER INSERT ON users
+BEGIN
+    INSERT INTO employee_metadata(user_id,employee_code)
+    VALUES (NEW.id,(CASE WHEN NEW.shop_id IS NULL THEN 'QL' ELSE 'NV' END)||printf('%06d',NEW.id));
+END;

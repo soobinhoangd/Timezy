@@ -10,6 +10,7 @@ let shops = [];
 let records = [];
 let shifts = [];
 let requests = [];
+let transfers = [];
 let periods = [];
 let employees = [];
 let registrations = [];
@@ -18,6 +19,7 @@ let weeklyData = null;
 let weeklyDraft = new Set();
 let weeklyEditing = false;
 let weeklyDirty = false;
+let weeklyLoadId = 0;
 let selectedMonth = "";
 let period = null;
 let selectedShop = "";
@@ -143,8 +145,8 @@ async function start() {
   await refresh();
 }
 async function refresh() {
-  [records, shifts, requests, periods] = await Promise.all([
-    api("/attendance"), api("/shifts"), api("/requests"), api("/periods")
+  [records, shifts, requests, periods, transfers] = await Promise.all([
+    api("/attendance"), api("/shifts"), api("/requests"), api("/periods"), api("/shift-transfers")
   ]);
   if (owner()) [employees, registrations] = await Promise.all([api("/employees"),api("/account-registrations")]);
   selectedMonth = periods.some(p=>p.month===selectedMonth) ? selectedMonth : periods[0]?.month || "";
@@ -153,18 +155,20 @@ async function refresh() {
   render();
 }
 function render() {
-  const tabs = [["home", owner()?"Tổng quan":"Ca làm của tôi"],["shifts","Đăng ký & xếp ca"],["requests","Giải trình & bổ sung"],["payroll","Bảng công & lương"],["notifications","Thông báo"],["account","Tài khoản"]];
+  const tabs = [["home", owner()?"Tổng quan":"Ca làm của tôi"],["shifts","Đăng ký & xếp ca"],["payroll","Bảng công & lương"],["notifications","Thông báo"],["account","Tài khoản"]];
   if (owner()) tabs.push(["employees","Nhân viên"]);
   root.innerHTML = '<div class="shell"><aside><div><div class="brand">timezy<span>·</span></div><p translate="no">Dao Matcha &amp; Mixue</p></div><nav aria-label="Chức năng">'+tabs.map(([id,label])=>'<button data-action="navigate" data-id="'+id+'" class="'+(view===id?"active":"")+'" '+(view===id?'aria-current="page"':"")+'>'+label+'</button>').join("")+'</nav><div class="account"><div><strong>'+escape(me.name)+'</strong><p>'+ (owner()?"Chủ quán":escape(shopName(me.shop_id)))+'</p></div>'+button("logout","Đăng xuất")+'</div></aside><main><div class="topbar"><span class="muted">'+new Intl.DateTimeFormat("vi-VN",{dateStyle:"full",timeZone:"Asia/Ho_Chi_Minh"}).format(new Date())+'</span><span class="pill">'+(owner()?"Quản lý hai cơ sở":escape(shopName(me.shop_id)))+'</span></div><div id="content"></div></main></div>';
   const content = document.getElementById("content");
   if (view === "home") renderHome(content);
   if (view === "shifts") renderShifts(content);
-  if (view === "requests") renderRequests(content);
   if (view === "payroll") renderPayroll(content);
   if (view === "employees") renderEmployees(content);
   if (view === "account") renderAccount(content);
   if (view === "notifications") {
     content.innerHTML = '<h1>Thông báo</h1><p class="muted">Lịch ca, kết quả xử lý và yêu cầu xác nhận.</p>';
+    const inbox=document.createElement("section");
+    content.append(inbox);
+    renderTransferInbox(inbox);
     api("/notifications").then(items => {
       if (view === "notifications") content.innerHTML += items.length ? '<div class="grid">'+items.map(n=>'<article class="card"><span class="muted">'+dateTime(n.created)+'</span><p>'+escape(n.message)+'</p></article>').join("")+'</div>' : empty("Bạn chưa có thông báo.");
     }).catch(error=>flash(error.message));
@@ -180,6 +184,9 @@ function attendanceCard(item) {
       actions += pending ? '<span class="pill">Giải trình đang chờ duyệt</span>' :
         button(state.missedIn || state.missedOut ? "explain-missing" : "explain","Giải trình",item.id);
     }
+    const waiting=transfers.some(t=>t.attendance_id===item.id && t.display_status==="pending" && Date.parse(t.starts)>currentTime());
+    actions += waiting ? '<span class="pill">Đổi ca đang chờ xác nhận</span>' :
+      '<button type="button" data-action="transfer" data-id="'+item.id+'" '+(item.closed||item.check_in||Date.parse(item.starts)<=currentTime()?"disabled":"")+'>Đổi ca</button>';
   }
   const live = owner() ? item : {...item,...shiftState(item,currentTime())};
   return '<article class="card"><span class="pill">'+escape(shopName(item.shop_id))+'</span><h3>'+dateTime(item.starts)+' → '+dateTime(item.ends)+'</h3>'+(owner()?'<p>'+escape(item.name)+'</p>':"")+'<p class="muted">'+statusLabels[live.status]+(live.late?" · Đi muộn":"")+'</p><p>Vào '+dateTime(item.check_in)+'<br>Ra '+dateTime(item.check_out)+'</p><div class="actions">'+actions+'</div></article>';
@@ -188,6 +195,7 @@ function renderEmployeeHome(content) {
   content.innerHTML = '<span class="eyebrow">Ca làm của tôi</span><h1>Chấm công hôm nay</h1>'+
     '<section class="hero checkin-hero"><div><span class="muted">Giờ Việt Nam</span><div id="live-clock" class="live-clock"></div></div>'+
     '<div id="current-attendance" aria-live="polite"></div></section>'+
+    '<section id="transfer-inbox"></section>'+
     '<div class="row between"><div><h2>Lịch làm trong tuần</h2><p id="week-label" class="muted"></p></div>'+button("refresh","Cập nhật")+'</div>'+
     '<div id="weekly-shifts" class="grid"></div>'+button("schedule-issue","Báo quản lý chưa có ca");
   updateEmployeeHome();
@@ -197,6 +205,7 @@ function updateEmployeeHome() {
   const clock = document.getElementById("live-clock");
   if (!clock) return;
   const time = currentTime();
+  renderTransferInbox(document.getElementById("transfer-inbox"));
   clock.textContent = new Intl.DateTimeFormat("vi-VN",{timeZone:"Asia/Ho_Chi_Minh",hour:"2-digit",minute:"2-digit",second:"2-digit",day:"2-digit",month:"2-digit",year:"numeric"}).format(time);
   const selected = currentShift(records,time);
   const next = [...records].filter(r=>Date.parse(r.starts)>time && !r.check_out).sort((a,b)=>Date.parse(a.starts)-Date.parse(b.starts))[0];
@@ -219,12 +228,24 @@ function updateEmployeeHome() {
   if (list.dataset.markup!==cards) {list.innerHTML=cards; list.dataset.markup=cards;}
 }
 async function updateHomeData() {
-  if (!me || owner() || view!=="home" || document.hidden || homeUpdating || dialog.open) return;
+  if (!me || document.hidden || homeUpdating || dialog.open) return;
+  if(view==="shifts"&&weeklyMode==="current") {
+    homeUpdating=true;
+    try {
+      await loadWeekly();
+      transfers=await api("/shift-transfers");
+      if(view==="shifts"&&weeklyMode==="current") render();
+    } catch(error) {flash(error.message);}
+    finally {homeUpdating=false;}
+    return;
+  }
+  if(owner() || view!=="home") return;
   homeUpdating=true;
   try {
-    const [attendance, latestRequests] = await Promise.all([api("/attendance"),api("/requests"),syncClock()]);
+    const [attendance, latestRequests, latestTransfers] = await Promise.all([api("/attendance"),api("/requests"),api("/shift-transfers"),syncClock()]);
     records=attendance;
     requests=latestRequests;
+    transfers=latestTransfers;
     clockOnline=true;
   } catch {
     clockOnline=false;
@@ -249,6 +270,13 @@ function renderHome(content) {
   day.addEventListener("change",()=>{selectedDay=day.value; render();});
   const shop = content.querySelector("[name=filter_shop]");
   if (shop) {shop.value=selectedShop; shop.addEventListener("change",()=>{selectedShop=shop.value; render();});}
+  const requestQueue = document.createElement("section");
+  requestQueue.className = "request-queue";
+  content.append(requestQueue);
+  renderRequests(requestQueue);
+  const transferQueue=document.createElement("section");
+  content.append(transferQueue);
+  renderTransferInbox(transferQueue);
 }
 function renderShifts(content) {
   if (!weeklyData) {content.innerHTML=empty("Đang tải lịch tuần…"); return;}
@@ -259,38 +287,65 @@ function renderShifts(content) {
     '<button role="tab" aria-selected="'+(weeklyMode==="next")+'" data-action="weekly-tab" data-id="next">Đăng ký lịch tuần sau</button></div>'+
     '<div class="filters">'+(owner()?shopSelect("weekly-shop"):"")+'<span class="pill">'+escape(shopName(weeklyData.shop_id))+' · '+dateLabel.format(new Date(weeklyData.days[0]+"T00:00:00+07:00"))+' – '+dateLabel.format(new Date(weeklyData.days[6]+"T00:00:00+07:00"))+'</span></div>';
   const days=weeklyData.days;
-  const headers=days.map((day,index)=>'<th scope="col">'+(index===6?"Chủ nhật":"Thứ "+(index+2))+'<br>'+dateLabel.format(new Date(day+"T00:00:00+07:00"))+'</th>').join("");
+  const headers=days.map((day,index)=>'<th scope="col" class="'+(index>=5?"weekend":"")+'">'+(index===6?"Chủ nhật":"Thứ "+(index+2))+'<br>'+dateLabel.format(new Date(day+"T00:00:00+07:00"))+'</th>').join("");
   const names={morning:"Ca sáng",afternoon:"Ca chiều",evening:"Tối full",split:"Tối gãy"};
   let table="";
   if (weeklyMode==="current") {
-    table='<p class="muted">Lịch đã công bố của tất cả nhân viên trong quán.</p><div class="table-wrap"><table class="week-table"><thead><tr><th scope="col">Nhân viên</th>'+headers+'</tr></thead><tbody>'+
-      weeklyData.employees.map(employee=>'<tr><th scope="row">'+escape(employee.name)+'</th>'+days.map(day=>{
-        const start=Date.parse(day+"T00:00:00+07:00"),end=start+86400000;
-        const assigned=weeklyData.schedule.filter(s=>s.user_id===employee.id && Date.parse(s.starts)<end && Date.parse(s.ends)>start);
-        return '<td>'+assigned.map(s=>{
-          const match=weeklyData.templates.find(t=>t.starts===s.starts.slice(11,16));
-          const name=match?names[match.slot]:"Ca làm";
-          return '<div class="schedule-chip">'+name+'<br><small>'+escape(s.starts.slice(11,16))+'–'+escape(s.ends.slice(11,16))+(s.starts.slice(0,10)!==s.ends.slice(0,10)?" · qua đêm":"")+'</small></div>';
-        }).join("")+(!assigned.length?'<span class="muted">—</span>':"")+'</td>';
-      }).join("")+'</tr>').join("")+'</tbody></table></div>'+
-      (!weeklyData.employees.length?empty("Quán chưa có nhân viên đã được duyệt."):"");
+    const rosterHeaders=days.map((day,index)=>'<th scope="col" class="'+(index>=5?"weekend":"")+'">'+(index===6?"Chủ nhật":"Thứ "+(index+2))+'<br><small>'+dateLabel.format(new Date(day+"T00:00:00+07:00"))+'</small></th>').join("");
+    const hours=slot=>{
+      const template=weeklyData.templates.find(t=>t.slot===slot);
+      return template?.starts+"–"+template?.ends;
+    };
+    const groups=[{key:"morning",name:"Sáng",hours:hours("morning")},{key:"afternoon",name:"Chiều",hours:hours("afternoon")},{key:"night",name:"Tối",hours:hours("evening")+" · G "+hours("split")}];
+    const shiftSlot=shift=>{
+      if(shift.slot) return shift.slot;
+      const configured=weeklyData.templates.find(t=>t.starts===shift.starts.slice(11,16));
+      if(configured) return configured.slot;
+      const hour=shift.starts.slice(11,16);
+      return hour>="20:00"?"split":hour>="18:00"?"evening":hour>="12:00"?"afternoon":"morning";
+    };
+    table='<p class="muted">Lịch đã công bố của cả quán. Ký hiệu (G) là ca tối gãy từ 20:00.</p><div class="table-wrap"><table class="week-table roster-table"><caption class="sr-only">Lịch nhân viên theo ca từ thứ Hai đến Chủ nhật</caption><thead><tr><th scope="col">Ca làm</th>'+rosterHeaders+'</tr></thead><tbody>'+
+      groups.map(group=>'<tr><th scope="row">'+group.name+'<br><small>'+group.hours+'</small></th>'+days.map(day=>{
+        const assigned=weeklyData.schedule.filter(shift=>{
+          const slot=shiftSlot(shift);
+          return shift.starts.slice(0,10)===day && (group.key==="night"?(slot==="evening"||slot==="split"):slot===group.key);
+        }).sort((a,b)=>Date.parse(a.starts)-Date.parse(b.starts)||a.user_id-b.user_id);
+        const names=assigned.map(shift=>{
+          const employee=weeklyData.employees.find(person=>person.id===shift.user_id);
+          return '<span'+(shift.user_id===me.id?' class="my-roster-name"':"")+'>'+escape(employee?.name||"Nhân viên #"+shift.user_id)+(shiftSlot(shift)==="split"?" (G)":"")+'</span>';
+        }).join('<span class="roster-separator"> / </span>');
+        const own=assigned.filter(shift=>!owner()&&shift.user_id===me.id&&Date.parse(shift.starts)>currentTime());
+        return '<td>'+(names||'<span class="muted">—</span>')+(own.length?'<div class="actions">'+own.map(shift=>button("transfer","Đổi ca",shift.attendance_id)).join("")+'</div>':"")+'</td>';
+      }).join("")+'</tr>').join("")+'</tbody></table></div>';
   } else {
-    table='<p class="muted">'+(owner()?"Chọn từng ô để xem nhân viên đăng ký và công bố ca.":"Tích các ca có thể đi làm, sau đó bấm Xác nhận đăng ký để gửi cho chủ quán.")+'</p>'+
-      '<div class="table-wrap"><table class="week-table registration-table"><thead><tr><th scope="col">Ca làm</th>'+headers+'</tr></thead><tbody>'+
-      Object.entries(names).map(([slot,name])=>{
-        const template=weeklyData.templates.find(t=>t.slot===slot);
-        const hours=template?.starts && template?.ends ? template.starts+"–"+template.ends:
-          template?.starts ? "Từ "+template.starts+" · chưa đặt giờ kết thúc" : "Chưa cấu hình giờ";
-        return '<tr><th scope="row">'+name+'<br><small class="muted">'+escape(hours)+'</small></th>'+
-          days.map(day=>{
-            const cell=weeklyData.cells.find(c=>c.day===day && c.slot===slot);
-            if(owner()) return '<td>'+(cell.published?'<span class="pill">Đã công bố</span>':
-              '<div class="candidate-list">'+cell.candidates.map(c=>'<span>'+escape(c.name)+'</span>').join("")+'</div>'+
-              (cell.candidates.length?button("weekly-pick","Xếp ca",day+"|"+slot):'<span class="muted">Chưa ai đăng ký</span>'))+'</td>';
-            const checked=weeklyDraft.has(day+"|"+slot);
-            return '<td><label class="slot-check '+(checked?"is-checked":"")+'"><input type="checkbox" data-weekday="'+day+'" data-slot="'+slot+'" '+(checked?"checked ":"")+((cell.published||!weeklyEditing)?"disabled ":"")+' aria-label="'+escape(name+" ngày "+day)+'"><span>'+(cell.published?"Đã chốt":checked?"Đã chọn":"Có thể làm")+'</span></label></td>';
-          }).join("")+'</tr>';
-      }).join("")+'</tbody></table></div>'+
+    const slotHours=slot=>{
+      const template=weeklyData.templates.find(t=>t.slot===slot);
+      return template.starts+"–"+template.ends;
+    };
+    const option=(day,slot)=>{
+      const cell=weeklyData.cells.find(c=>c.day===day&&c.slot===slot);
+      const title=slot==="evening"?"Full":slot==="split"?"Gãy (G)":"";
+      let body="";
+      if(owner()) {
+        const assigned=weeklyData.schedule.filter(s=>s.id===cell.shift_id).map(s=>weeklyData.employees.find(e=>e.id===s.user_id)?.name||"Nhân viên #"+s.user_id);
+        body=cell.published?'<span class="pill">Đã xếp</span><p>'+assigned.map(escape).join(" / ")+'</p>':
+          '<div class="candidate-list">'+cell.candidates.map(c=>'<span>'+escape(c.name)+'</span>').join("")+'</div>'+
+          (cell.candidates.length?button("weekly-pick","Chọn 1 người",day+"|"+slot):'<span class="muted">Chưa ai đăng ký</span>');
+      } else {
+        const checked=weeklyDraft.has(day+"|"+slot);
+        const assignment=weeklyData.schedule.find(s=>s.id===cell.shift_id&&s.user_id===me.id);
+        body='<label class="slot-check '+(checked?"is-checked":"")+'"><input type="checkbox" data-weekday="'+day+'" data-slot="'+slot+'" '+(checked?"checked ":"")+((cell.published||!weeklyEditing)?"disabled ":"")+' aria-label="'+escape(names[slot]+" ngày "+day)+'"><span>'+(cell.published?(assignment?"Ca của bạn":"Đã chốt"):checked?"Đã chọn":"Có thể làm")+'</span></label>'+
+          (assignment?button("transfer","Đổi ca",assignment.attendance_id):"");
+      }
+      return '<div class="registration-option">'+(title?'<strong>'+title+'</strong><br><small>'+slotHours(slot)+'</small><br>':"")+'<small class="muted">1 vị trí</small>'+body+'</div>';
+    };
+    const groups=[{name:"Sáng",slots:["morning"],hours:slotHours("morning"),capacity:"1 nhân viên"},
+                  {name:"Chiều",slots:["afternoon"],hours:slotHours("afternoon"),capacity:"1 nhân viên"},
+                  {name:"Tối",slots:["evening","split"],hours:"Full và Gãy (G)",capacity:"2 nhân viên"}];
+    table='<p class="muted">'+(owner()?"Mỗi ca sáng và chiều chọn một người. Buổi tối chọn riêng một người full và một người gãy.":"Chọn ca có thể làm, rồi xác nhận đăng ký. Sáng và chiều mỗi ca một vị trí; tối có hai vị trí riêng Full và Gãy (G).")+'</p>'+
+      '<div class="table-wrap"><table class="week-table roster-table registration-table"><thead><tr><th scope="col">Ca làm</th>'+headers+'</tr></thead><tbody>'+
+      groups.map(group=>'<tr><th scope="row">'+group.name+'<br><small>'+group.hours+'</small><br><small>'+group.capacity+'</small></th>'+
+        days.map(day=>'<td>'+group.slots.map(slot=>option(day,slot)).join("")+'</td>').join("")+'</tr>').join("")+'</tbody></table></div>'+
       (!owner()?'<div class="row between registration-actions"><div><p id="week-count">Đã chọn '+weeklyDraft.size+' ca</p><span class="pill">'+(weeklyEditing?"Đang chỉnh sửa · Chưa gửi": "Đã xác nhận đăng ký")+'</span></div><div class="actions">'+
         (weeklyEditing?button("weekly-confirm",weeklyData.submission?"Xác nhận thay đổi":"Xác nhận đăng ký","","primary")+button("weekly-cancel","Hủy chỉnh sửa"):
           button("weekly-edit","Chỉnh sửa đăng ký","","primary"))+'</div></div>':"");
@@ -304,7 +359,10 @@ function renderShifts(content) {
 }
 async function loadWeekly() {
   const branch=owner()?(selectedShop||String(shops[0]?.id)):String(me.shop_id);
-  weeklyData=await api("/weekly?week="+weeklyMode+"&shop_id="+encodeURIComponent(branch));
+  const mode=weeklyMode, loadId=++weeklyLoadId, actorId=me.id;
+  const data=await api("/weekly?week="+mode+"&shop_id="+encodeURIComponent(branch));
+  if(loadId!==weeklyLoadId || mode!==weeklyMode || me?.id!==actorId) return false;
+  weeklyData=data;
   weeklyDraft=new Set(weeklyData.cells.filter(c=>c.registered).map(c=>c.day+"|"+c.slot));
   weeklyEditing=!weeklyData.submission;
   weeklyDirty=false;
@@ -331,8 +389,26 @@ window.addEventListener("beforeunload",event=>{
 });
 
 
+function renderTransferInbox(content) {
+  if(!content) return;
+  const pending=transfers.filter(t=>t.display_status==="pending" && Date.parse(t.starts)>currentTime());
+  const history=transfers.filter(t=>!pending.includes(t)).slice(0,4);
+  const items=[...pending,...history];
+  const labels={pending:"Chờ xác nhận",accepted:"Đã nhận ca",rejected:"Đã từ chối",cancelled:"Đã hủy",expired:"Yêu cầu hết hiệu lực"};
+  const html=items.length?'<h2>Yêu cầu đổi ca</h2><div class="grid">'+items.map(t=>{
+    const status=t.display_status==="pending" && Date.parse(t.starts)<=currentTime()?"expired":t.display_status;
+    const title=owner()?escape(t.sender_name)+" → "+escape(t.recipient_name):
+      t.sender_id===me.id?"Bạn nhờ "+escape(t.recipient_name):escape(t.sender_name)+" nhờ bạn thay ca";
+    let controls="";
+    if(status==="pending"&&t.recipient_id===me.id) controls=button("transfer-accept","Đồng ý nhận ca",t.id,"primary")+button("transfer-reject","Từ chối",t.id);
+    if(t.status==="pending"&&t.sender_id===me.id) controls=button("transfer-cancel","Hủy yêu cầu",t.id);
+    return '<article class="card"><span class="pill">'+labels[status]+'</span><h3>'+title+'</h3><p>'+escape(shopName(t.shop_id))+' · '+dateTime(t.starts)+' → '+dateTime(t.ends)+'</p><div class="actions">'+controls+'</div></article>';
+  }).join("")+'</div>':"";
+  if(content.dataset.markup!==html) {content.innerHTML=html;content.dataset.markup=html;}
+}
+
 function renderRequests(content) {
-  content.innerHTML = '<h1>Giải trình & bổ sung công</h1><p class="muted">'+(owner()?"Đối chiếu từng yêu cầu với lịch ca và giờ chấm thực tế.":"Gửi yêu cầu từ ca làm hoặc bảng công của bạn.")+'</p><div class="grid">'+requests.map(r=>'<article class="card"><span class="pill">'+statusLabels[r.status]+'</span><h3>'+escape(r.name)+' · '+(r.kind==="explanation"?"Giải trình":"Bổ sung công")+'</h3><p class="muted">'+escape(shopName(r.shop_id))+' · '+dateTime(r.starts)+' → '+dateTime(r.ends)+'</p><p>Đã ghi '+dateTime(r.check_in)+' → '+dateTime(r.check_out)+'</p>'+(r.proposed_in?'<p>Đề nghị '+dateTime(r.proposed_in)+' → '+dateTime(r.proposed_out)+'</p>':"")+'<p>'+escape(r.reason)+'</p>'+(r.decision_reason?'<p>Lý do từ chối · '+escape(r.decision_reason)+'</p>':"")+(owner() && r.status==="pending"?'<div class="actions">'+button("approve","Duyệt",r.id,"primary")+button("reject","Từ chối",r.id,"danger")+'</div>':"")+'</article>').join("")+'</div>'+(!requests.length?empty("Chưa có yêu cầu giải trình hoặc bổ sung công."):"");
+  content.innerHTML = '<h2>Yêu cầu giải trình và bổ sung công</h2><p class="muted">'+(owner()?"Đối chiếu từng yêu cầu với lịch ca và giờ chấm thực tế.":"Gửi yêu cầu từ ca làm hoặc bảng công của bạn.")+'</p><div class="grid">'+requests.map(r=>'<article class="card"><span class="pill">'+statusLabels[r.status]+'</span><h3>'+escape(r.name)+' · '+(r.kind==="explanation"?"Giải trình":"Bổ sung công")+'</h3><p class="muted">'+escape(shopName(r.shop_id))+' · '+dateTime(r.starts)+' → '+dateTime(r.ends)+'</p><p>Đã ghi '+dateTime(r.check_in)+' → '+dateTime(r.check_out)+'</p>'+(r.proposed_in?'<p>Đề nghị '+dateTime(r.proposed_in)+' → '+dateTime(r.proposed_out)+'</p>':"")+'<p>'+escape(r.reason)+'</p>'+(r.decision_reason?'<p>Lý do từ chối · '+escape(r.decision_reason)+'</p>':"")+(owner() && r.status==="pending"?'<div class="actions">'+button("approve","Duyệt",r.id,"primary")+button("reject","Từ chối",r.id,"danger")+'</div>':"")+'</article>').join("")+'</div>'+(!requests.length?empty("Chưa có yêu cầu giải trình hoặc bổ sung công."):"");
 }
 function entriesTable(entries) {
   return '<div class="table-wrap"><table><thead><tr><th>Nhân viên</th><th>Ca</th><th>Giờ vào</th><th>Giờ ra</th><th>Giờ công</th><th>Tiền công</th><th>Thao tác</th></tr></thead><tbody>'+entries.map(e=>'<tr><td>'+escape(e.name)+'</td><td>'+dateTime(e.starts)+'</td><td>'+dateTime(e.check_in)+'</td><td>'+dateTime(e.check_out)+'</td><td>'+(e.seconds_worked/3600).toFixed(2)+'</td><td>'+money(e.pay)+'</td><td>'+(!owner()&&!period.closed?button("correct","Bổ sung",e.id):"")+'</td></tr>').join("")+'</tbody></table></div>';
@@ -360,7 +436,36 @@ function renderEmployees(content) {
 }
 
 function renderAccount(content) {
-  content.innerHTML='<h1>Tài khoản của bạn</h1><p class="muted">'+escape(me.name)+'</p><div class="grid"><section class="card"><h2>Đổi mật khẩu</h2><form id="change-password">'+field("current_password","Mật khẩu hiện tại","password","","autocomplete='current-password' maxlength='256'")+field("new_password","Mật khẩu mới","password","","minlength='8' maxlength='256' autocomplete='new-password'")+field("confirm_password","Nhập lại mật khẩu mới","password","","minlength='8' maxlength='256' autocomplete='new-password'")+errorSlot+'<button type="submit" class="primary">Đổi mật khẩu</button></form></section><section class="card"><h2>Mã khôi phục</h2><p>Tạo mã và lưu riêng để đặt lại mật khẩu nếu quên. Mã mới sẽ thay thế mã cũ.</p><form id="recovery-code">'+field("current_password","Xác nhận mật khẩu hiện tại","password","","autocomplete='current-password' maxlength='256'")+errorSlot+'<button type="submit">Tạo mã khôi phục mới</button></form><div id="recovery-result" aria-live="polite"></div></section></div>';
+  const initials=me.name.trim().split(/\s+/).slice(-2).map(word=>Array.from(word)[0]).join("").toUpperCase();
+  const avatar=me.avatar?'<img src="'+escape(me.avatar)+'" alt="Ảnh đại diện của '+escape(me.name)+'">':'<span aria-label="Ảnh đại diện mặc định">'+escape(initials)+'</span>';
+  const workplace=owner()?"Chủ quán / Quản lý · Dao Matcha & Mixue":"Nhân viên · "+escape(me.shop_name||shopName(me.shop_id));
+  const profileHeader='<span class="eyebrow">Hồ sơ của bạn</span><h1>Tài khoản</h1><section class="card profile-header"><div class="profile-photo"><div class="profile-avatar">'+avatar+'</div><label class="avatar-upload" for="avatar-file">Đổi ảnh</label><input class="sr-only" id="avatar-file" type="file" accept="image/jpeg,image/png,image/webp"></div><div class="profile-identity"><h2>'+escape(me.name)+'</h2><p class="muted">'+escape(me.email||"Email chưa cập nhật")+'</p><span class="pill">'+workplace+'</span></div></section>'+
+    '<section class="card account-menu"><button type="button" class="account-menu-item" data-action="basic-info"><span><strong>Thông tin cơ bản</strong><small>Tên, thông tin liên hệ và hồ sơ nhân viên</small></span><span aria-hidden="true">›</span></button><div class="account-menu-item"><span><strong>Ngôn ngữ</strong><small>Ngôn ngữ hiển thị hiện tại</small></span><span class="pill">Tiếng Việt</span></div></section>';
+
+  content.innerHTML=profileHeader+'<details class="account-security"><summary>Bảo mật tài khoản</summary><div class="grid"><section class="card"><h2>Đổi mật khẩu</h2><form id="change-password">'+field("current_password","Mật khẩu hiện tại","password","","autocomplete='current-password' maxlength='256'")+field("new_password","Mật khẩu mới","password","","minlength='8' maxlength='256' autocomplete='new-password'")+field("confirm_password","Nhập lại mật khẩu mới","password","","minlength='8' maxlength='256' autocomplete='new-password'")+errorSlot+'<button type="submit" class="primary">Đổi mật khẩu</button></form></section><section class="card"><h2>Mã khôi phục</h2><p>Tạo mã và lưu riêng để đặt lại mật khẩu nếu quên. Mã mới sẽ thay thế mã cũ.</p><form id="recovery-code">'+field("current_password","Xác nhận mật khẩu hiện tại","password","","autocomplete='current-password' maxlength='256'")+errorSlot+'<button type="submit">Tạo mã khôi phục mới</button></form><div id="recovery-result" aria-live="polite"></div></section></div></details>';
+  content.querySelector("#avatar-file").addEventListener("change", async event=>{
+    const input=event.target;
+    const file=input.files[0];
+    if(!file) return;
+    input.disabled=true;
+    try {
+      if(!["image/jpeg","image/png","image/webp"].includes(file.type)||file.size>5*1024*1024) throw new Error("Chọn ảnh JPEG, PNG hoặc WebP tối đa 5 MB.");
+      const bitmap=await createImageBitmap(file);
+      const canvas=document.createElement("canvas");
+      canvas.width=128;canvas.height=128;
+      const context=canvas.getContext("2d");
+      const size=Math.min(bitmap.width,bitmap.height);
+      context.fillStyle="#ffffff";context.fillRect(0,0,128,128);
+      context.drawImage(bitmap,(bitmap.width-size)/2,(bitmap.height-size)/2,size,size,0,0,128,128);
+      bitmap.close();
+      const avatar=canvas.toDataURL("image/jpeg",0.8);
+      if(avatar.length>24000) throw new Error("Ảnh chưa thể nén đủ nhỏ. Vui lòng chọn ảnh khác.");
+      me=await api("/me/avatar",{avatar});
+      render();
+      flash("Đã cập nhật ảnh đại diện.");
+    } catch(error) {flash(error.message);}
+    finally {input.disabled=false;input.value="";}
+  });
   content.querySelector("#change-password").addEventListener("submit", async event=>{
     event.preventDefault();
     await submit(event.target,async values=>{
@@ -379,6 +484,19 @@ function renderAccount(content) {
       content.querySelector("#recovery-result").innerHTML='<p class="note">Lưu mã ở nơi riêng tư.</p><textarea readonly aria-label="Mã khôi phục">'+escape(result.recovery_code)+'</textarea>';
     });
   });
+}
+function basicDate(value) {
+  return value?new Intl.DateTimeFormat("vi-VN",{timeZone:"Asia/Ho_Chi_Minh",dateStyle:"short"}).format(new Date(value+"T00:00:00+07:00")):"Chưa cập nhật";
+}
+function showBasicInfo() {
+  const gender={male:"Nam",female:"Nữ",other:"Khác"};
+  const details=[["Tên",me.name],["Ngày sinh",basicDate(me.birth_date)],["Giới tính",gender[me.gender]],
+    ["Email",me.email],["Số điện thoại",me.phone],["CCCD",me.national_id],["Mã nhân viên",me.employee_code],
+    ["Mức lương",money(me.hourly_rate)+" / giờ"],["Ngày gia nhập",basicDate(me.joined_on)]];
+  dialog.innerHTML='<div class="row between"><h2 id="dialog-title">Thông tin cơ bản</h2>'+button("cancel","Đóng")+'</div>'+
+    '<dl class="profile-details">'+details.map(([label,value])=>'<div><dt>'+label+'</dt><dd>'+escape(value||"Chưa cập nhật")+'</dd></div>').join("")+'</dl>'+
+    button("edit-basic","Cập nhật thông tin cá nhân","","primary");
+  dialog.showModal();
 }
 function modal(title, body, onSave, label = "Lưu và gửi") {
   dialog.innerHTML='<form><div class="row between"><h2 id="dialog-title">'+title+'</h2>'+button("cancel","Đóng")+'</div>'+body+errorSlot+'<button type="submit" class="primary">'+label+'</button></form>';
@@ -405,6 +523,42 @@ async function submit(form, action) {
   finally {submitButton.disabled=false;}
 }
 async function action(name,id) {
+  if(name==="basic-info") {showBasicInfo();return;}
+  if(name==="edit-basic") {
+    dialog.close();
+    modal("Cập nhật thông tin cá nhân",
+      field("name","Tên","text",me.name,"maxlength='100' autocomplete='name'")+
+      field("birth_date","Ngày sinh","date",me.birth_date||"","autocomplete='bday'")+
+      '<label>Giới tính<select name="gender" required><option value="">Chọn giới tính</option>'+
+      [["male","Nam"],["female","Nữ"],["other","Khác"]].map(([value,label])=>'<option value="'+value+'" '+(me.gender===value?"selected":"")+'>'+label+'</option>').join("")+'</select></label>'+
+      field("email","Email","email",me.email||"","maxlength='254' autocomplete='email'")+
+      field("phone","Số điện thoại","tel",me.phone||"","maxlength='30' autocomplete='tel'")+
+      '<label>CCCD<input name="national_id" value="'+escape(me.national_id||"")+'" inputmode="numeric" pattern="[0-9]{12}" maxlength="12" autocomplete="off"></label>'+
+      '<p class="muted">Mã nhân viên, mức lương và ngày gia nhập được quản lý bởi quán.</p>',
+      async values=>{me=await api("/me/profile",values);},"Lưu thông tin");
+    return;
+  }
+  if(name==="transfer") {
+    if(weeklyDirty) {
+      if(!discardWeeklyDraft()) return;
+      await loadWeekly();
+      render();
+    }
+    const candidates=await api("/attendance/"+id+"/replacements");
+    if(!candidates.length) {flash("Chưa có nhân viên cùng quán đủ điều kiện nhận ca này.");return;}
+    modal("Chọn người thay ca",'<p>Người được chọn sẽ nhận yêu cầu và cần đồng ý trước khi ca được chuyển.</p><label>Nhân viên thay ca<select name="recipient_id" required><option value="">Chọn nhân viên</option>'+
+      candidates.map(c=>'<option value="'+c.id+'">'+escape(c.name)+'</option>').join("")+'</select></label>',
+      values=>api("/attendance/"+id+"/transfer",{recipient_id:Number(values.recipient_id)}),"Gửi yêu cầu đổi ca");
+    return;
+  }
+  if(name==="transfer-accept"||name==="transfer-reject"||name==="transfer-cancel") {
+    const accepted=name==="transfer-accept";
+    modal(name==="transfer-cancel"?"Hủy yêu cầu đổi ca":accepted?"Xác nhận nhận ca":"Từ chối nhận ca",
+      '<p>'+(accepted?"Ca sẽ được chuyển vào lịch của bạn và xóa khỏi lịch người gửi sau khi bạn xác nhận.":name==="transfer-cancel"?"Người được nhờ thay sẽ nhận thông báo hủy yêu cầu.":"Ca tiếp tục thuộc lịch của người gửi.")+'</p>',
+      ()=>api("/shift-transfers/"+id+(name==="transfer-cancel"?"/cancel":"/respond"),name==="transfer-cancel"?{}:{accept:accepted}),
+      accepted?"Đồng ý nhận ca":"Xác nhận");
+    return;
+  }
   if (name==="weekly-tab") {if(!discardWeeklyDraft()) return;weeklyMode=id;await loadWeekly();render();return;}
   if (name==="weekly-edit") {weeklyEditing=true;render();return;}
   if (name==="weekly-cancel") {
@@ -438,7 +592,7 @@ async function action(name,id) {
   if (name==="weekly-pick") {
     const [day,slot]=id.split("|");
     const cell=weeklyData.cells.find(c=>c.day===day && c.slot===slot);
-    modal("Chọn nhân viên cho ca "+day,cell.candidates.map(c=>'<label class="check"><input type="checkbox" name="employee_ids" value="'+c.id+'">'+escape(c.name)+'</label>').join(""),
+    modal("Chọn một nhân viên cho ca "+day,'<p>Mỗi ca có một người. Buổi tối gồm một người ca full và một người ca gãy.</p>'+cell.candidates.map(c=>'<label class="check"><input type="radio" name="employee_ids" value="'+c.id+'" required>'+escape(c.name)+'</label>').join(""),
       (_,data)=>api("/weekly/publish",{shop_id:weeklyData.shop_id,day,slot,employee_ids:data.getAll("employee_ids").map(Number)}),"Công bố ca");
     return;
   }
@@ -473,7 +627,7 @@ async function action(name,id) {
   if (name==="candidates") {
     const candidates=await api("/shifts/"+id+"/candidates");
     if (!candidates.length) {flash("Chưa có nhân viên đăng ký ca này."); return;}
-    modal("Chọn nhân viên đã đăng ký",candidates.map(c=>'<label class="check"><input type="checkbox" name="employee_ids" value="'+c.id+'">'+escape(c.name)+'</label>').join(""),
+    modal("Chọn một nhân viên đã đăng ký",candidates.map(c=>'<label class="check"><input type="radio" name="employee_ids" value="'+c.id+'" required>'+escape(c.name)+'</label>').join(""),
       (_,data)=>api("/shifts/"+id+"/publish",{employee_ids:data.getAll("employee_ids").map(Number)}),"Công bố lịch");
     return;
   }
