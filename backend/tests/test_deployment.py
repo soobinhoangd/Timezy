@@ -77,6 +77,19 @@ class DeploymentTest(unittest.TestCase):
         self.request("/logout","POST",{},token=token)
         self.assertEqual(self.request("/me",token=token)["status"],401)
 
+    def test_prefixed_api_preserves_auth_and_session_revocation(self):
+        self.bootstrap()
+        self.assertEqual(self.request("/api/health")["status"],200)
+        self.assertEqual(self.request("/api/me")["status"],401)
+        login=self.request("/api/login","POST",{"username":"owner","password":"Secure-test-password-123"})
+        self.assertEqual(login["status"],200)
+        token=json.loads(login["body"])["token"]
+        profile=self.request("/api/me",token=token)
+        self.assertEqual(json.loads(profile["body"])["role"],"owner")
+        self.assertEqual(profile["headers"]["Cache-Control"],"no-store")
+        self.assertEqual(self.request("/api/logout","POST",{},token=token)["status"],200)
+        self.assertEqual(self.request("/api/me",token=token)["status"],401)
+
 
 if __name__=="__main__":
     unittest.main()

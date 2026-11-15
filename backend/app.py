@@ -220,6 +220,9 @@ def string(data, key, limit=1000):
 
 
 def dispatch(db, method, path, query, data, auth, at):
+    # Vercel uses /api; keep legacy routes for existing clients and healthchecks.
+    if path.startswith("/api/"):
+        path = path[4:]
     if method == "GET" and path == "/health":
         return {"ok": True}
     if method == "GET" and path == "/clock":

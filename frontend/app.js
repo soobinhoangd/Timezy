@@ -58,7 +58,7 @@ function flash(text) {
   flashTimer = setTimeout(() => feedback.textContent = "", 5000);
 }
 async function api(path, data, binary = false) {
-  const response = await fetch(path, {
+  const response = await fetch("/api" + path, {
     method: data === undefined ? "GET" : "POST",
     headers: {"Authorization": "Bearer "+token, "Content-Type":"application/json"},
     body: data === undefined ? undefined : JSON.stringify(data)

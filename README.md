@@ -1,10 +1,12 @@
 # Timezy
 
+[Mở ứng dụng Timezy](https://timezy-production.up.railway.app/)
+
+Có thể tách frontend lên Vercel và giữ backend/database trên Railway theo [hướng dẫn Vercel + Railway](DEPLOY_VERCEL.md). Cấu hình Vercel nằm trong `frontend/vercel.json`; chọn Root Directory là `frontend` khi import.
+
 Backend và frontend web cho ứng dụng chấm công Đảo Matcha và Mixue. Mỗi nhân viên thuộc một cơ sở. Chủ quán quản lý cả hai cơ sở.
 
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https%3A%2F%2Fgithub.com%2Fsoobinhoangd%2FTimezy)
-
-Triển khai chạy liên tục với ổ đĩa SQLite riêng theo [hướng dẫn Render](DEPLOY_RENDER.md). Cấu hình dùng gói trả phí, chủ tài khoản xác nhận chi phí trên Render trước khi tạo dịch vụ.
+Triển khai trên **Railway** bằng Dockerfile sẵn có, gắn volume để giữ dữ liệu SQLite. Làm theo [hướng dẫn Railway](DEPLOY_RAILWAY.md) để tạo dịch vụ, tài khoản chủ quán và URL công khai. Kiểm tra chi phí trên Railway để duy trì dịch vụ chạy liên tục.
 
 ## Cấu trúc dự án
 
